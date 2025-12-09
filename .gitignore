@@ -1,5 +1,5 @@
-node_modules
-*_sessions
+node_modules/
+sessions/
 *qr.png
 *.log
 .env
