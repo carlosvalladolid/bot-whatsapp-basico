@@ -369,10 +369,6 @@ async function startBot() {
             markOnlineOnConnect: false,
             retryRequestDelayMs: 250,
             connectTimeoutMs: 60000,
-            keepAliveIntervalMs: 30000,
-            emitOwnEventsUnfiltered: false,
-            generateHighQualityLinkPreview: false,
-            patchMessageBeforeSending: false,
         })
 
         // Evento: Actualización de conexión (incluye QR)
