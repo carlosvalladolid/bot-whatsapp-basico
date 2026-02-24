@@ -10,7 +10,7 @@
   },
   "keywords": [],
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "@whiskeysockets/baileys": "^6.7.21",
     "dotenv": "^16.6.1",
     "node-fetch": "^3.3.2",
     "qrcode-terminal": "^0.12.0"

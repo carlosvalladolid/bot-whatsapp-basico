@@ -1,4 +1,4 @@
-import Baileys, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys'
+import { default as makeWASocket, DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys'
 import QRCode from 'qrcode-terminal'
 import 'dotenv/config.js'
 import { join } from 'path'
@@ -361,11 +361,18 @@ async function startBot() {
         const { state, saveCreds } = await useMultiFileAuthState(sessionPath)
 
         // Crear conexión con WhatsApp
-        sock = Baileys({
+        sock = makeWASocket({
             auth: state,
-            browser: ['Ubuntu', 'Chrome', '120.0.0.0'],
+            browser: ['Chrome', 'Chrome', '120.0.0.0'],
+            version: [2, 3000, 1033893291],
             syncFullHistory: false,
-            markOnlineOnConnect: true,
+            markOnlineOnConnect: false,
+            retryRequestDelayMs: 250,
+            connectTimeoutMs: 60000,
+            keepAliveIntervalMs: 30000,
+            emitOwnEventsUnfiltered: false,
+            generateHighQualityLinkPreview: false,
+            patchMessageBeforeSending: false,
         })
 
         // Evento: Actualización de conexión (incluye QR)
@@ -397,8 +404,8 @@ async function startBot() {
                 console.log('✅ ¡Conectado a WhatsApp!')
                 console.log(`📱 Número: ${sock.user.id}`)
                 
-                // Sincronizar chats para recibir mensajes de conversaciones existentes
-                await syncChats()
+                // Nota: syncChats() no está disponible en esta versión de Baileys
+                // El bot recibirá automáticamente mensajes de conversaciones existentes
             }
         })
 
