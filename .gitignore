@@ -1,5 +1,8 @@
 node_modules/
 sessions/
+sessions_backup/
+sessions_v7_test/
+node_modules/
 *qr.png
 *.log
 .env

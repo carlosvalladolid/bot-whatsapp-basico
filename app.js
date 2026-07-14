@@ -1,4 +1,8 @@
-import { default as makeWASocket, DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys'
+import makeWASocket, {
+    Browsers,
+    DisconnectReason,
+    useMultiFileAuthState
+} from 'baileys'
 import QRCode from 'qrcode-terminal'
 import 'dotenv/config.js'
 import { join } from 'path'
@@ -6,15 +10,17 @@ import { existsSync, mkdirSync } from 'fs'
 import fetch from 'node-fetch'
 
 const PORT = process.env.PORT || 3000
-const SERVER_NUMBER = "8124267007"
+const SERVER_NUMBER = "8124241086"
 
 // Crear carpeta para guardar la sesión
-const sessionPath = join(process.cwd(), 'sessions')
+const sessionPath = join(process.cwd(), 'sessions_v7_test')
 if (!existsSync(sessionPath)) {
     mkdirSync(sessionPath, { recursive: true })
 }
 
 let sock = null
+let isStarting = false
+let reconnectTimer = null
 
 // ==================== VARIABLES GLOBALES ====================
 let lastApiMessageDate = null  // Almacena la fecha y hora del último mensaje que consumió API
@@ -23,29 +29,6 @@ let lastFiveMessages = []      // Array que almacena los últimos 5 mensajes
 
 // ==================== FUNCIONES DE FLUJOS ====================
 
-/**
- * Sincronizar chats al conectarse
- * Esto asegura que Baileys reciba mensajes entrantes de conversaciones existentes
- */
-async function syncChats() {
-    try {
-        console.log('🔄 Sincronizando chats...')
-        const chats = await sock.store.chats.all()
-        console.log(`📌 Total de chats sincronizados: ${chats.length}`)
-        
-        // Marcar todos los chats como "leídos" para activar la sincronización
-        for (const chat of chats) {
-            try {
-                await sock.readMessages([chat.messages[chat.messages.length - 1]?.key])
-            } catch (e) {
-                // Ignorar errores individuales
-            }
-        }
-        console.log('✅ Sincronización de chats completada')
-    } catch (error) {
-        console.error('⚠️  Error al sincronizar chats:', error.message)
-    }
-}
 function getFormattedDateTime() {
     const now = new Date()
     const year = now.getFullYear()
@@ -353,26 +336,71 @@ async function processMessage(sender, messageText) {
     console.log(`⏭️  Mensaje no coincide con ningún flujo`)
 }
 
-async function startBot() {
+function closeSocket(socketToClose, reason) {
+    if (!socketToClose) return
+
+    socketToClose.ev.removeAllListeners('connection.update')
+    socketToClose.ev.removeAllListeners('creds.update')
+    socketToClose.ev.removeAllListeners('messages.upsert')
+
     try {
-        console.log('🚀 Iniciando bot WhatsApp...')
+        socketToClose.end(new Error(reason))
+    } catch (error) {
+        console.error(`⚠️ Error al cerrar el socket anterior: ${error.message}`)
+    }
+
+    if (sock === socketToClose) sock = null
+}
+
+function scheduleReconnect(delay, reason) {
+    if (reconnectTimer) {
+        console.log(`⏭️ Reconexión ignorada; ya existe una pendiente. Motivo nuevo: ${reason}`)
+        return
+    }
+
+    console.log(`⏳ Reconexión programada en ${delay} ms. Motivo: ${reason}`)
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        console.log(`🔄 Ejecutando reconexión. Motivo: ${reason}`)
+        startBot()
+    }, delay)
+}
+
+async function startBot() {
+    if (isStarting) {
+        console.log('⏭️ Intento de startBot ignorado; ya hay otro inicio en curso')
+        return
+    }
+
+    isStarting = true
+    let newSocket = null
+
+    try {
+        console.log('🚀 Iniciando nuevo socket de WhatsApp...')
+
+        if (sock) {
+            console.log('🧹 Cerrando y limpiando el socket anterior antes de crear uno nuevo')
+            closeSocket(sock, 'Reemplazo controlado del socket')
+        }
         
         // Cargar estado de autenticación
         const { state, saveCreds } = await useMultiFileAuthState(sessionPath)
 
         // Crear conexión con WhatsApp
-        sock = makeWASocket({
+        newSocket = makeWASocket({
             auth: state,
-            browser: ['Chrome', 'Chrome', '120.0.0.0'],
-            version: [2, 3000, 1033893291],
+            browser: Browsers.ubuntu('Chrome'),
             syncFullHistory: false,
             markOnlineOnConnect: false,
             retryRequestDelayMs: 250,
             connectTimeoutMs: 60000,
         })
+        sock = newSocket
 
         // Evento: Actualización de conexión (incluye QR)
-        sock.ev.on('connection.update', async (update) => {
+        newSocket.ev.on('connection.update', async (update) => {
+            if (sock !== newSocket) return
+
             const { connection, lastDisconnect, qr } = update
 
             // Mostrar QR en terminal
@@ -386,30 +414,42 @@ async function startBot() {
 
             // Manejar desconexión
             if (connection === 'close') {
-                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
-                if (shouldReconnect) {
-                    console.log('⚠️  Conexión cerrada. Reconectando...')
-                    setTimeout(() => startBot(), 3000)
-                } else {
-                    console.log('❌ Sesión cerrada')
+                const disconnectError = lastDisconnect?.error
+                const statusCode = disconnectError?.output?.statusCode ?? disconnectError?.statusCode
+                console.log(`⚠️ Conexión cerrada. Código de desconexión: ${statusCode ?? 'desconocido'}`)
+
+                if (statusCode === DisconnectReason.loggedOut) {
+                    if (reconnectTimer) {
+                        clearTimeout(reconnectTimer)
+                        reconnectTimer = null
+                    }
+                    closeSocket(newSocket, 'Sesión cerrada mediante loggedOut')
+                    console.log('❌ Sesión cerrada mediante loggedOut; no se reconectará automáticamente. Es necesario volver a vincularla.')
+                    return
                 }
+
+                if (statusCode === DisconnectReason.restartRequired) {
+                    scheduleReconnect(1000, `Baileys solicitó reinicio (${statusCode})`)
+                    return
+                }
+
+                scheduleReconnect(3000, `desconexión recuperable (${statusCode ?? 'código desconocido'})`)
             }
 
             // Manejar conexión exitosa
             if (connection === 'open') {
-                console.log('✅ ¡Conectado a WhatsApp!')
-                console.log(`📱 Número: ${sock.user.id}`)
-                
-                // Nota: syncChats() no está disponible en esta versión de Baileys
-                // El bot recibirá automáticamente mensajes de conversaciones existentes
+                console.log('✅ Conexión de WhatsApp abierta')
+                console.log(`📱 Número: ${newSocket.user.id}`)
             }
         })
 
         // Evento: Guardar credenciales cuando se actualicen
-        sock.ev.on('creds.update', saveCreds)
+        newSocket.ev.on('creds.update', saveCreds)
 
         // Evento: Recibir mensajes
-        sock.ev.on('messages.upsert', async (m) => {
+        newSocket.ev.on('messages.upsert', async (m) => {
+            if (sock !== newSocket) return
+
             const message = m.messages[0]
             
             // Ignorar mensajes que ya fueron respondidos o mensajes propios
@@ -445,12 +485,15 @@ async function startBot() {
             await processMessage(sender, receivedMessage)
         })
 
+        isStarting = false
+
     } catch (error) {
         console.error('⚡ Error:', error.message)
         console.error('Detalles:', error.stack)
         
-        // Reintentar en 10 segundos
-        setTimeout(() => startBot(), 10000)
+        isStarting = false
+        closeSocket(newSocket, 'Limpieza después de un error durante el inicio')
+        scheduleReconnect(10000, `error al iniciar el socket: ${error.message}`)
     }
 }
 
@@ -460,8 +503,10 @@ startBot()
 // Manejar cierre elegante
 process.on('SIGINT', async () => {
     console.log('\n👋 Cerrando bot...')
-    if (sock) {
-        sock.end(new Error('Cierre del usuario'))
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
     }
+    closeSocket(sock, 'Cierre del usuario')
     process.exit(0)
 })
