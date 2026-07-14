@@ -10,7 +10,7 @@ import { existsSync, mkdirSync } from 'fs'
 import fetch from 'node-fetch'
 
 const PORT = process.env.PORT || 3000
-const SERVER_NUMBER = "8124241086"
+const SERVER_NUMBER = "8124267007"
 
 // Crear carpeta para guardar la sesión
 const sessionPath = join(process.cwd(), 'sessions_v7_test')
