@@ -10,7 +10,7 @@ import { existsSync, mkdirSync } from 'fs'
 import fetch from 'node-fetch'
 
 const PORT = process.env.PORT || 3000
-const SERVER_NUMBER = "8124267007"
+const SERVER_NUMBER = "8124267007" // Número de servidor para enviar a la API
 
 // Crear carpeta para guardar la sesión
 const sessionPath = join(process.cwd(), 'sessions_v7_test')
